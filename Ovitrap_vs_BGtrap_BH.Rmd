@@ -355,7 +355,7 @@ ggplot(bgtrap_results_4, aes(avg_cluster_prop))+
 
 ```
 
-## Combine Ovitrap and BG-trap into One Dataframe
+### Combine Ovitrap and BG-trap into One Dataframe
 ```{r}
 ## comparing avg_cluster_prop from both Ovitraps and BG Traps
 trap_results <- left_join(bgtrap_results_4, ovitrap_results_4, by = c("cluster" = "cluster", "month" = "month"))
@@ -385,7 +385,7 @@ trap_results_final_cluster <- trap_results_final %>%
 
 ```
 
-## Plots of Wolbachia Prevalences
+### Plots of Wolbachia Prevalences
 ```{r}
 ## set colors
 colors <- c("Ovitrap" = "blue", "BG-Trap" = "red")
@@ -438,7 +438,8 @@ ggplot(aes(x = cluster))+
 
 ```
 
-## Correlation Plots 
+## Correlation between Trap Types 
+### Correlation Plots 
 ```{r}
 ## By Month
 trap_results_final_2 <- trap_results_final %>%
@@ -468,3 +469,828 @@ lm_model <- lm(ovitrap~bg, data = trap_results_final_2)
 
 ```
 
+### Statistical Tests Comparing Traps
+```{r}
+## Group data sets by cluster 
+trap_results_final_3 <- trap_results_final %>%
+  group_by(cluster)
+
+trap_results_final_cluster_2 <- trap_results_final_cluster %>%
+  group_by(cluster)
+
+## T-Test
+###by cluster 
+t.test(trap_results_final_cluster_2$cluster_ovi, trap_results_final_cluster_2$cluster_bg, paired = T) 
+
+### by cluster and time point
+t.test(trap_results_final_3$ovitrap, trap_results_final_3$bg, paired = T) 
+
+## Correlation
+### check linearity
+### by cluster  
+ggplot(trap_results_final_cluster_2)+
+  geom_point(aes(cluster_ovi, cluster_bg))+
+  geom_line(aes(cluster_ovi, cluster_ovi), color = "red")+
+  theme_bw()+
+  xlab("Ovitrap Prevalence")+
+  ylab("BG-Trap Prevalence")+
+  labs(title = "Ovitrap vs. BG-Trap By Cluster")
+
+#### by cluster and time point
+ggplot(trap_results_final_3)+
+  geom_point(aes(ovitrap, bg))+
+  geom_line(aes(ovitrap, ovitrap), color = "red")+
+  theme_bw()+
+  xlab("Ovitrap Prevalence")+
+  ylab("BG-Trap Prevalence")+
+  labs(title = "Ovitrap vs. BG-Trap By Cluster and Time Point") 
+
+## check heteroskedasticity
+lm1 <- lm(cluster_bg ~ cluster_ovi, data = trap_results_final_cluster_2)
+lm2 <- lm(bg ~ ovitrap, data = trap_results_final_3)
+
+### look at plots 
+par(mfrow=c(2,2))
+plot(lm1)
+par(mfrow=c(2,2))
+plot(lm2)
+
+## Spearman-rank Correlation Test
+### across clusters 
+cor.test(~cluster_ovi+cluster_bg, data = trap_results_final_cluster_2, method = "spearman")
+
+### across clusters and time points
+cor.test(~ovitrap+bg, data = trap_results_final_3, method = "spearman") 
+
+```
+
+## Predictive Regression Models 
+### Set Up Data Frames for Models 
+```{r - stats df's}
+## cluster level data frame
+d1 <- ovitrap_results_4 %>%
+  rename(n_aeg_ovi = aeg_cluster_tot, 
+         n_alb_ovi = alb_cluster_tot, 
+         n_tested_ovi = cluster_tot_tested, 
+         n_wmel_ovi = wmel_cluster_tot, 
+         n_wt_ovi = wt_cluster_tot, 
+         ovitrap = avg_cluster_prop, 
+         ovitrap_lower_CI = lower_CI, 
+         ovitrap_upper_CI = upper_CI) %>%
+  mutate(n_total_ovi = n_aeg_ovi + n_alb_ovi) %>%
+  dplyr::select(cluster, month, n_aeg_ovi, n_alb_ovi, n_tested_ovi, n_wmel_ovi, 
+                n_wt_ovi, n_total_ovi, ovitrap, ovitrap_lower_CI, ovitrap_upper_CI)
+  
+d2 <- bgtrap_results_4 %>%
+  rename(n_aeg_bg = aeg_cluster_tot, 
+         n_alb_bg = alb_cluster_tot, 
+         n_tested_bg = cluster_tot_tested, 
+         n_wmel_bg = wmel_cluster_tot, 
+         n_wt_bg = wt_cluster_tot, 
+         bg = avg_cluster_prop, 
+         bg_lower_CI = lower_CI, 
+         bg_upper_CI = upper_CI) %>%
+  mutate(n_total_bg = n_aeg_bg + n_alb_bg) %>%
+  dplyr::select(cluster, month, n_aeg_bg, n_alb_bg, n_tested_bg, n_wmel_bg, 
+                n_wt_bg, n_total_bg, bg, bg_lower_CI, bg_upper_CI)
+
+mod2_df <- left_join(d2, d1, by = c("cluster" = "cluster", "month" = "month"))
+
+model2_df <- mod2_df %>%
+  ungroup() %>%
+  mutate(total_caught = n_total_bg) %>%
+  group_by(cluster) %>%
+  arrange(month) %>%
+  mutate(lag_1_ovi_count = lag(n_wmel_ovi, 1),
+         lag_2_ovi_count = lag(n_wmel_ovi, 2),
+         lag_3_ovi_count = lag(n_wmel_ovi, 3),
+         lag_1_ovi_prop = lag(ovitrap, 1),
+         lag_2_ovi_prop = lag(ovitrap, 2)) %>%
+  ungroup()
+
+model3_df <- model2_df %>%
+  group_by(cluster) %>%
+  arrange(cluster, month) %>%
+  mutate(ovi_count_lag_1 = lag(n_wmel_ovi, 1),
+         ovi_count_lag_2 = lag(n_wmel_ovi, 2),
+         bg_count_lag_1 = lag(n_wmel_bg, 1),
+         bg_count_lag_2 = lag(n_wmel_bg, 2),
+         bg_prop_lag_1 = lag(bg, 1),
+         bg_prop_lag_2 = lag(bg, 2)) %>%
+  arrange(cluster, desc(month)) %>%
+         mutate(lag_plus_1_bg_counts = lag(n_wmel_bg, 1)) %>%
+  arrange(cluster, month) %>%
+  ungroup()
+
+```
+
+### Check Autocorrelation
+```{r - check autocorrelation}
+
+clusters <- unique(model3_df$cluster)
+model4_df <- model3_df %>%
+  dplyr::select(cluster) %>%
+  distinct(cluster)
+model4_df$bg_ovi_cor <- NA 
+model4_df$bg_ovi_cor_p <- NA 
+model4_df$bg_lag_1_ovi_cor <- NA 
+model4_df$bg_lag_1_ovi_cor_p <- NA
+model4_df$lag_plus_1_bg_ovi_cor <- NA 
+model4_df$lag_plus_1_bg_ovi_cor_p <- NA
+
+for (i in seq_along(clusters)) {
+  ## Set cluster
+  cl <- clusters[i]
+  
+  ## Extract counts safely
+  cluster_data <- model3_df %>%
+    filter(cluster == cl) %>%
+    dplyr::select(n_wmel_bg, n_wmel_ovi, lag_1_ovi_count, lag_2_ovi_count, lag_plus_1_bg_counts)
+  
+  ## Ensure at least 2 non-NA observations for correlation
+  if (nrow(cluster_data) < 2 || sum(complete.cases(cluster_data)) < 2) {
+    model4_df$bg_ovi_cor[i] <- NA
+    model4_df$bg_ovi_cor_p[i] <- NA
+    model4_df$bg_lag_1_ovi_cor[i] <- NA
+    model4_df$bg_lag_1_ovi_cor_p[i] <- NA
+    model4_df$lag_plus_1_bg_ovi_cor[i] <- NA
+    model4_df$lag_plus_1_bg_ovi_cor_p[i] <- NA
+    next  # Skip to the next iteration
+  }
+  
+  ## Create data frame for correlation
+  df <- cluster_data
+  
+  ## Spearman correlation tests with NA handling
+  tryCatch({
+    bg_ovi_cor <- cor.test(df$n_wmel_bg, df$n_wmel_ovi, method = "spearman")
+    model4_df$bg_ovi_cor[i] <- bg_ovi_cor$estimate
+    model4_df$bg_ovi_cor_p[i] <- bg_ovi_cor$p.value
+  }, error = function(e) {
+    model4_df$bg_ovi_cor[i] <- NA
+    model4_df$bg_ovi_cor_p[i] <- NA
+  })
+  
+  tryCatch({
+    bg_lag_1_ovi_cor <- cor.test(df$n_wmel_bg, df$lag_1_ovi_count, method = "spearman")
+    model4_df$bg_lag_1_ovi_cor[i] <- bg_lag_1_ovi_cor$estimate
+    model4_df$bg_lag_1_ovi_cor_p[i] <- bg_lag_1_ovi_cor$p.value
+  }, error = function(e) {
+    model4_df$bg_lag_1_ovi_cor[i] <- NA
+    model4_df$bg_lag_1_ovi_cor_p[i] <- NA
+  })
+  
+  tryCatch({
+    lag_plus_1_bg_ovi_cor <- cor.test(df$lag_plus_1_bg_counts, df$n_wmel_ovi, method = "spearman")
+    model4_df$lag_plus_1_bg_ovi_cor[i] <- lag_plus_1_bg_ovi_cor$estimate
+    model4_df$lag_plus_1_bg_ovi_cor_p[i] <- lag_plus_1_bg_ovi_cor$p.value
+  }, error = function(e) {
+    model4_df$lag_plus_1_bg_ovi_cor[i] <- NA
+    model4_df$lag_plus_1_bg_ovi_cor_p[i] <- NA
+  })
+}
+
+```
+
+### Models 
+```{r}
+## run models 
+mod1 <- glmer.nb(n_wmel_bg ~ lag_1_ovi_count + (1|cluster) + 
+                  offset(log(total_caught)),  
+                  na.action=na.exclude, data = model2_df)
+mod2 <- glmer.nb(n_wmel_bg ~ lag_1_ovi_count + ovitrap + (1|cluster) + 
+                  offset(log(total_caught)),  
+                  na.action=na.exclude, data = model2_df)
+mod3 <- glmer.nb(n_wmel_bg ~ lag_1_ovi_count + lag_1_ovi_prop +
+                (1|cluster) + offset(log(total_caught)),  
+                  na.action=na.exclude, data = model2_df)
+mod4 <- glmer.nb(n_wmel_bg ~ lag_1_ovi_count + month +
+                (1|cluster) + offset(log(total_caught)),  
+                  na.action=na.exclude, data = model2_df)
+mod5 <- glmer.nb(n_wmel_bg ~ lag_1_ovi_count + lag_1_ovi_prop + ovitrap +
+                (1|cluster) + offset(log(total_caught)),  
+                  na.action=na.exclude, data = model2_df)
+mod6 <- glmer.nb(n_wmel_bg ~ lag_1_ovi_count + lag_1_ovi_prop +
+                  month + (1|cluster) + offset(log(total_caught)),  
+                  na.action=na.exclude, data = model2_df) 
+mod7 <- glmer.nb(n_wmel_bg ~ lag_1_ovi_count + lag_1_ovi_prop + ovitrap + month +
+                (1|cluster) + offset(log(total_caught)),  
+                  na.action=na.exclude, data = model2_df)
+mod8 <- glmer.nb(n_wmel_bg ~ lag_1_ovi_count + ovitrap*month + (1|cluster) + 
+                  offset(log(total_caught)),  
+                  na.action=na.exclude, data = model2_df)
+mod9 <- glmer.nb(n_wmel_bg ~ lag_1_ovi_count + lag_1_ovi_prop + ovitrap*month + 
+                  (1|cluster) + offset(log(total_caught)),  
+                  na.action=na.exclude, data = model2_df) 
+
+## get Mean Absolute Errors (MAEs)
+models1 <- c('1', '2', '3', '4', '5', '6', '7', '8', '9')
+models <- list(mod1, mod2, mod3, mod4, mod5, mod6, mod7, mod8, mod9)
+
+real_bg_counts <- model2_df$n_wmel_bg
+
+## create data frame to add to  
+  mod_df <- as.data.frame(matrix(ncol = 2, nrow = 9))
+  colnames(mod_df) <- c('model', 'MAE')
+  mod_df$model <- models1
+  mod_df$MAE <- NA
+  
+for(i in 1:length(models)){
+  
+  # calculate response variables 
+  mod <- models[[i]]
+  response <- predict(mod, type = "response")
+  
+  # create table to calc
+  df <- as.data.frame(matrix(ncol = 2, nrow = 36))
+  colnames(df) <- c('real_counts', 'model_counts')
+  df$real_counts <- real_bg_counts
+  df$model_counts <- response
+  
+  summ <- df %>%
+    mutate(diff = real_counts - model_counts) %>%
+    summarize(mae = mean(diff, na.rm = T))
+  
+  # add to MAE table
+  mod_df$MAE[i] <- summ$mae
+}
+
+## calculate BIC  
+BIC(mod1, mod2, mod3, mod4, mod5, mod6, mod7, mod8, mod9) 
+```
+
+### Model Plots
+```{r}
+## set up data frame with model predictions and CI's
+## Model 5 
+pred_mod_df <- model2_df
+
+### define a function to get the fitted values
+fitted_fun <- function(model) {
+  predict(model, type = "response")
+}
+### use bootMer to get bootstrapped CIs
+set.seed(123)  # For reproducibility
+boot_results <- bootMer(mod5, FUN = fitted_fun, nsim = 1000, use.u = TRUE)
+
+### Calculate the bootstrapped confidence intervals
+boot_ci <- apply(boot_results$t, 2, function(x) quantile(x, c(0.025, 0.975), na.rm = T))
+
+### Combine the results into a data frame
+fitted_values <- predict(mod5, type = "response")
+ci_df_mod5 <- data.frame(fitted_values = fitted_values,
+                    lower_ci = boot_ci[1, ],
+                    upper_ci = boot_ci[2, ])
+# attach to df
+pred_mod_df$mod5_count <- ci_df_mod5$fitted_values
+pred_mod_df$mod5_lw_ci <- ci_df_mod5$lower_ci
+pred_mod_df$mod5_up_ci <- ci_df_mod5$upper_ci
+
+## Model 2
+mod_pred_2 <- predict(mod2, type = "link", se.fit = T)
+
+### use bootMer to get bootstrapped CIs
+set.seed(123)  # For reproducibility
+boot_results <- bootMer(mod2, FUN = fitted_fun, nsim = 1000, use.u = TRUE)
+
+### Calculate the bootstrapped confidence intervals
+boot_ci <- apply(boot_results$t, 2, function(x) quantile(x, c(0.025, 0.975), na.rm = T))
+
+### Combine the results into a data frame
+fitted_values <- predict(mod2, type = "response")
+ci_df_mod2 <- data.frame(fitted_values = fitted_values,
+                    lower_ci = boot_ci[1, ],
+                    upper_ci = boot_ci[2, ])
+
+### attach to df
+pred_mod_df$mod2_count <- ci_df_mod2$fitted_values
+pred_mod_df$mod2_lw_ci <- ci_df_mod2$lower_ci
+pred_mod_df$mod2_up_ci <- ci_df_mod2$upper_ci
+
+
+## calculate the model error
+pred_mod_df_2 <- pred_mod_df %>%
+  mutate(diff_5 = (mod5_count - n_wmel_bg), 
+         error_5 = diff_5/n_wmel_bg,
+         diff_2 = (mod2_count - n_wmel_bg), 
+         error_2 = diff_2/n_wmel_bg)
+
+## look at error by cluster and month
+pred_mod_df_2 %>%
+  group_by(cluster, month) %>%
+  filter(error_5 != Inf | error_2 != Inf) %>%
+  summarize(overall_5 = mean(error_5, na.rm = T), 
+            overall_2 = mean(error_2, na.rm = T))
+
+## look at error by onth
+pred_mod_df_2 %>%
+  ungroup() %>%
+  group_by(month) %>%
+  filter(error_5 != Inf | error_2 != Inf) %>%
+  summarize(overall_5 = mean(error_5, na.rm = T), 
+            overall_2 = mean(error_2, na.rm = T))
+
+## plot point estimates
+colors <- c("Model 5" = "blue", "Model 2" = "lightblue", "BG-Trap" = "red")
+
+### march
+pred_mod_df_2 %>%
+  filter(month == "march") %>%
+ggplot(aes(x = cluster))+
+  geom_point(aes(y = n_wmel_bg, color = "BG-Trap"), size = 3)+
+  geom_point(aes(y = mod5_count, color = "Model 5"), size = 3)+
+  geom_point(aes(y = mod2_count, color = "Model 2"), size = 3)+
+  theme_classic()+ 
+  xlab("Cluster")+
+  ylab("wMel Count")+
+  scale_color_manual(name = "Trap Type", values = colors)+
+  theme(axis.text = element_text(size = 16), 
+        axis.title = element_text(size = 18, face = "bold"))
+
+### april 
+pred_mod_df_2 %>%
+  filter(month == "april") %>%
+ggplot(aes(x = cluster))+
+  geom_point(aes(y = n_wmel_bg, color = "BG-Trap"), size = 3)+
+  geom_point(aes(y = mod5_count, color = "Model 5"), size = 3)+
+  geom_errorbar(aes(ymin = mod5_lw_ci, ymax = mod5_up_ci), color = "blue", lty = 3)+
+  geom_point(aes(y = mod2_count, color = "Model 2"), size = 3)+
+  geom_errorbar(aes(ymin = mod2_lw_ci, ymax = mod2_up_ci), color = "lightblue", lty = 3)+
+  theme_classic()+ 
+  xlab("Cluster")+
+  ylab("wMel Count")+
+  scale_color_manual(name = "Trap Type", values = colors)+
+  theme(axis.text = element_text(size = 16), 
+        axis.title = element_text(size = 18, face = "bold"))
+
+### may
+pred_mod_df_2 %>%
+  filter(month == "may") %>%
+ggplot(aes(x = cluster))+
+  geom_point(aes(y = n_wmel_bg, color = "BG-Trap"), size = 3)+
+  geom_point(aes(y = mod5_count, color = "Model 5"), size = 3)+
+  geom_errorbar(aes(ymin = mod5_lw_ci, ymax = mod5_up_ci), color = "blue", lty = 3)+
+  geom_point(aes(y = mod2_count, color = "Model 2"), size = 3)+
+  geom_errorbar(aes(ymin = mod2_lw_ci, ymax = mod2_up_ci), color = "lightblue", lty = 3)+
+  theme_classic()+ 
+  xlab("Cluster")+
+  ylab("wMel Count")+
+  scale_color_manual(name = "Trap Type", values = colors)+
+  theme(axis.text = element_text(size = 16), 
+        axis.title = element_text(size = 18, face = "bold"))
+
+
+## plot prevalence estimates
+pred_mod_df_3 <- pred_mod_df_2 %>%
+  mutate(mod5_prev = mod5_count/n_tested_bg, 
+         mod5_prev_adj = if_else(mod5_prev > 1, 1, mod5_prev),
+         mod2_prev = mod2_count/n_tested_bg, 
+         mod2_prev_adj = if_else(mod2_prev > 1, 1, mod2_prev))
+
+### add binomial confidence intervals
+pred_mod_df_3$mod5_prev_lw_CI <- NA
+pred_mod_df_3$mod5_prev_up_CI <- NA
+pred_mod_df_3$mod2_prev_lw_CI <- NA
+pred_mod_df_3$mod2_prev_up_CI <- NA
+
+for(i in 1:nrow(pred_mod_df_3)){
+  # model 5
+  prop_5 <- pred_mod_df_3$mod5_prev[i]
+  
+  if(is.na(prop_5) | prop_5 > 1){
+    pred_mod_df_3$mod5_prev_lw_CI[i] <- NA
+    pred_mod_df_3$mod5_prev_up_CI[i] <- NA
+  } else{
+      tot_tested_5 <- pred_mod_df_3$n_tested_bg[i]
+  
+  conf_5 <- prop.test(x = prop_5*tot_tested_5, n = tot_tested_5, conf.level = 0.95, correct = F)
+  
+  pred_mod_df_3$mod5_prev_lw_CI[i] <- conf_5$conf.int[[1]]
+  pred_mod_df_3$mod5_prev_up_CI[i] <- conf_5$conf.int[[2]]
+  }
+  
+  # model 2
+  prop_2 <- pred_mod_df_3$mod2_prev[i]
+  
+  if(is.na(prop_2) | prop_2 > 1){
+    pred_mod_df_3$mod2_prev_lw_CI[i] <- NA
+    pred_mod_df_3$mod2_prev_up_CI[i] <- NA
+  } else{
+      tot_tested_2 <- pred_mod_df_3$n_tested_bg[i]
+
+  conf_2 <- prop.test(x = prop_2*tot_tested_2, n = tot_tested_2, conf.level = 0.95, correct = F)
+  
+  pred_mod_df_3$mod2_prev_lw_CI[i] <- conf_2$conf.int[[1]]
+  pred_mod_df_3$mod2_prev_up_CI[i] <- conf_2$conf.int[[2]]
+  }
+}
+
+pred_mod_df_3 <- as.data.frame(pred_mod_df_3)
+
+### march
+pred_mod_df_3 %>%
+  filter(month == "march") %>%
+ggplot(aes(x = cluster))+
+  geom_point(aes(y = bg, color = "BG-Trap"), size = 3)+
+  geom_errorbar(aes(ymin = bg_lower_CI, ymax = bg_upper_CI), color = "red", lty = 3)+
+  geom_point(aes(y = mod5_count/n_tested_bg, color = "Model 5"), size = 3)+
+  theme_classic()+ 
+  xlab("Cluster")+
+  ylab("wMel Prevalence")+
+  scale_color_manual(name = "Trap Type", values = colors)+
+  theme(axis.text = element_text(size = 16), 
+        axis.title = element_text(size = 18, face = "bold"))
+
+### april
+pred_mod_df_3 %>%
+  filter(month == "april") %>%
+ggplot(aes(x = cluster))+
+  geom_point(aes(y = bg, color = "BG-Trap"), size = 3)+
+  geom_errorbar(aes(ymin = bg_lower_CI, ymax = bg_upper_CI), color = "red", lty = 3)+
+  geom_point(aes(y = mod5_prev, color = "Model 5"), size = 3)+
+  geom_errorbar(aes(ymin = mod5_prev_lw_CI, ymax = mod5_prev_up_CI), 
+                color = "blue", lty = 3)+
+  geom_point(aes(y = mod2_prev, color = "Model 2"), size = 3)+
+  geom_errorbar(aes(ymin = mod2_prev_lw_CI, ymax = mod2_prev_up_CI), 
+                color = "lightblue", lty = 3)+
+  theme_classic()+ 
+  xlab("Cluster")+
+  ylab("wMel Prevalence")+
+  scale_color_manual(name = "Trap Type", values = colors)+
+  theme(axis.text = element_text(size = 16), 
+        axis.title = element_text(size = 18, face = "bold"))
+
+### may
+pred_mod_df_3 %>%
+  filter(month == "may") %>%
+ggplot(aes(x = cluster))+
+  geom_point(aes(y = bg, color = "BG-Trap"), size = 3)+
+  geom_errorbar(aes(ymin = bg_lower_CI, ymax = bg_upper_CI), color = "red", lty = 3)+
+  geom_point(aes(y = mod5_prev, color = "Model 5"), size = 3)+
+  geom_errorbar(aes(ymin = mod5_prev_lw_CI, ymax = mod5_prev_up_CI), 
+                color = "blue", lty = 3)+
+  geom_point(aes(y = mod2_prev, color = "Model 2"), size = 3)+
+  geom_errorbar(aes(ymin = mod2_prev_lw_CI, ymax = mod2_prev_up_CI), 
+                color = "lightblue", lty = 3)+
+  theme_classic()+ 
+  xlab("Cluster")+
+  ylab("wMel Prevalence")+
+  scale_color_manual(name = "Trap Type", values = colors)+
+  theme(axis.text = element_text(size = 16), 
+        axis.title = element_text(size = 18, face = "bold"))
+
+## Check correlation
+### Model 5 counts
+ggplot(pred_mod_df_3, aes(n_wmel_bg, mod5_count))+
+  geom_point(size = 3)+
+  geom_errorbar(aes(xmin = bg_lower_CI, xmax = bg_upper_CI), alpha = 0.15, show.legend = F)+
+  geom_smooth(aes(n_wmel_bg, mod5_count), method = "lm", color = "red")+
+  theme_classic()+
+  xlab("BG-Trap wMel Count")+
+  ylab("Model 5 Predicted Count")+
+  theme(axis.text = element_text(size = 16), 
+        axis.title = element_text(size = 18, face = "bold"))+
+  theme(aspect.ratio = 1) 
+
+### calculate R^2
+lm_mod_5 <- lm(mod5_count ~ n_wmel_bg, data = pred_mod_df_3) 
+
+### Model 2 counts
+ggplot(pred_mod_df_3, aes(n_wmel_bg, mod2_count))+
+  geom_point(size = 3)+
+  geom_errorbar(aes(xmin = bg_lower_CI, xmax = bg_upper_CI), alpha = 0.15, show.legend = F)+
+  geom_smooth(aes(n_wmel_bg, mod2_count), method = "lm", color = "red")+
+  theme_classic()+
+  xlab("BG-Trap wMel Count")+
+  ylab("Model 2 Predicted Count")+
+  theme(axis.text = element_text(size = 16), 
+        axis.title = element_text(size = 18, face = "bold"))+
+  theme(aspect.ratio = 1) 
+
+### calculate R^2
+lm_mod_2 <- lm(mod2_count ~ n_wmel_bg, data = pred_mod_df_3) 
+
+### model 5 prevalence
+ggplot(pred_mod_df_3, aes(bg, mod5_prev))+
+  geom_point(size = 3)+
+  geom_smooth(aes(bg, mod5_prev), method = "lm", color = "red")+
+  geom_vline(xintercept = 0.6, color = "blue", lty = 2)+
+  geom_hline(yintercept = 0.6, color = "blue", lty = 2)+
+  theme_classic()+
+  xlab("BG-Trap Prevalence")+
+  ylab("Model 5 Predicted Prevalence")+
+  xlim(0, 1)+
+  ylim(0, 1.3)+
+  theme(axis.text = element_text(size = 16), 
+        axis.title = element_text(size = 18, face = "bold"))+
+  theme(aspect.ratio = 1)
+
+### calculate R^2
+lm_mod_5b <- lm(mod5_prev ~ bg, data = pred_mod_df_3) 
+
+### model 2 prevalence
+ggplot(pred_mod_df_3, aes(bg, mod2_prev))+
+  geom_point(size = 3)+
+  geom_smooth(aes(bg, mod2_prev), method = "lm", color = "red")+
+  geom_vline(xintercept = 0.6, color = "blue", lty = 2)+
+  geom_hline(yintercept = 0.6, color = "blue", lty = 2)+
+  theme_classic()+
+  xlab("BG-Trap Prevalence")+
+  ylab("Model 2 Predicted Prevalence")+
+  xlim(0, 1)+
+  ylim(0, 1.3)+
+  theme(axis.text = element_text(size = 16), 
+        axis.title = element_text(size = 18, face = "bold"))+
+  theme(aspect.ratio = 1)
+
+### calculate R^2
+lm_mod_2b <- lm(mod2_prev ~ bg, data = pred_mod_df_3) 
+
+## Spearman correlation
+### model 5
+cor.test(~mod5_prev+bg, data = pred_mod_df_3, method = "spearman", exact = F) 
+cor.test(~mod5_count+n_wmel_bg, data = pred_mod_df_3, method = "spearman", exact = F) 
+
+### model 2
+cor.test(~mod2_prev+bg, data = pred_mod_df_3, method = "spearman", exact = F) 
+cor.test(~mod2_count+n_wmel_bg, data = pred_mod_df_3, method = "spearman", exact = F) 
+
+```
+
+## Sensitivity Anlaysis - autocorrelation within and between traps
+```{r - trap autocorrelation}
+clusters <- unique(model3_df$cluster)
+model4_df <- model3_df %>%
+  dplyr::select(cluster) %>%
+  distinct(cluster)
+model4_df$bg_bg_cor <- NA 
+model4_df$bg_bg_cor_p <- NA 
+model4_df$bg_lag_1_bg_cor <- NA 
+model4_df$bg_lag_1_bg_cor_p <- NA
+model4_df$ovi_ovi_cor <- NA 
+model4_df$ovi_ovi_cor_p <- NA 
+model4_df$ovi_lag_1_ovi_cor <- NA 
+model4_df$ovi_lag_1_ovi_cor_p <- NA 
+model4_df$bg_lag_plus_1_bg_cor <- NA 
+model4_df$bg_lag_1_plus_bg_cor_p <- NA
+
+for (i in seq_along(clusters)) {
+  ## Set cluster
+  cl <- clusters[i]
+  
+  ## Extract counts safely
+  cluster_data <- model3_df %>%
+    filter(cluster == cl) %>%
+    dplyr::select(n_wmel_bg, bg_count_lag_1, n_wmel_ovi, lag_1_ovi_count, lag_2_ovi_count, lag_plus_1_bg_counts)
+  
+  ## Ensure at least 2 non-NA observations for correlation
+  if (nrow(cluster_data) < 2 || sum(complete.cases(cluster_data)) < 2) {
+    model4_df$bg_bg_cor[i] <- NA
+    model4_df$bg_bg_cor_p[i] <- NA
+    model4_df$bg_lag_1_bg_cor[i] <- NA
+    model4_df$bg_lag_1_bg_cor_p[i] <- NA
+    model4_df$ovi_ovi_cor[i] <- NA
+    model4_df$ovi_ovi_cor_p[i] <- NA
+    model4_df$ovi_lag_1_ovi_cor[i] <- NA
+    model4_df$ovi_lag_1_ovi_cor_p[i] <- NA
+    model4_df$bg_lag_plus_1_bg_cor[i] <- NA
+    model4_df$bg_lag_1_plus_bg_cor_p[i] <- NA
+    next  # Skip to the next iteration
+  }
+  
+  ## Create data frame for correlation
+  df <- cluster_data
+  df$bg_counts_1 <- df$n_wmel_bg
+  df$ovi_counts_1 <- df$n_wmel_ovi
+
+  ## Spearman correlation tests with error handling
+  tryCatch({
+    bg_bg_cor <- cor.test(df$n_wmel_bg, df$bg_counts_1, method = "spearman")
+    model4_df$bg_bg_cor[i] <- bg_bg_cor$estimate
+    model4_df$bg_bg_cor_p[i] <- bg_bg_cor$p.value
+  }, error = function(e) {
+    model4_df$bg_bg_cor[i] <- NA
+    model4_df$bg_bg_cor_p[i] <- NA
+  })
+
+  tryCatch({
+    bg_lag_1_bg_cor <- cor.test(df$n_wmel_bg, df$bg_count_lag_1, method = "spearman")
+    model4_df$bg_lag_1_bg_cor[i] <- bg_lag_1_bg_cor$estimate
+    model4_df$bg_lag_1_bg_cor_p[i] <- bg_lag_1_bg_cor$p.value
+  }, error = function(e) {
+    model4_df$bg_lag_1_bg_cor[i] <- NA
+    model4_df$bg_lag_1_bg_cor_p[i] <- NA
+  })
+  
+  tryCatch({
+    ovi_ovi_cor <- cor.test(df$n_wmel_ovi, df$ovi_counts_1, method = "spearman")
+    model4_df$ovi_ovi_cor[i] <- ovi_ovi_cor$estimate
+    model4_df$ovi_ovi_cor_p[i] <- ovi_ovi_cor$p.value
+  }, error = function(e) {
+    model4_df$ovi_ovi_cor[i] <- NA
+    model4_df$ovi_ovi_cor_p[i] <- NA
+  })
+  
+  tryCatch({
+    ovi_lag_1_ovi_cor <- cor.test(df$n_wmel_ovi, df$lag_1_ovi_count, method = "spearman")
+    model4_df$ovi_lag_1_ovi_cor[i] <- ovi_lag_1_ovi_cor$estimate
+    model4_df$ovi_lag_1_ovi_cor_p[i] <- ovi_lag_1_ovi_cor$p.value
+  }, error = function(e) {
+    model4_df$ovi_lag_1_ovi_cor[i] <- NA
+    model4_df$ovi_lag_1_ovi_cor_p[i] <- NA
+  })
+  
+  tryCatch({
+    bg_lag_1_plus_bg_cor <- cor.test(df$n_wmel_bg, df$lag_plus_1_bg_counts, method = "spearman")
+    model4_df$bg_lag_plus_1_bg_cor[i] <- bg_lag_1_plus_bg_cor$estimate
+    model4_df$bg_lag_1_plus_bg_cor_p[i] <- bg_lag_1_plus_bg_cor$p.value
+  }, error = function(e) {
+    model4_df$bg_lag_plus_1_bg_cor[i] <- NA
+    model4_df$bg_lag_1_plus_bg_cor_p[i] <- NA
+  })
+}
+
+```
+
+## Sensitivity Anlaysis - within cluster variation 
+```{r - within cluster variation}
+colors <- c("Ovitrap" = "blue", "BG-Trap" = "red")
+
+# box plot or violin plot with month on x axis, box for each trap type, and then variation within cluster as the y
+# each data point is a cluster-level variation by month
+## Ovitrap
+ovitrap_results_boxplot <- ovitrap_results_2 %>%
+  group_by(cluster, month) %>%
+  mutate(ovi_n_obs = n()) %>%
+  summarize(Ovitrap = var(trap_prop, na.rm = T), 
+            ovi_n_obs) %>%
+  mutate(month = factor(month, levels = c("March", "April", "May"), ordered = T)) %>%
+  distinct(cluster, month, .keep_all = T)
+
+### add confidence intervals
+ovitrap_results_boxplot$lower_ovi_CI <- NA
+ovitrap_results_boxplot$upper_ovi_CI <- NA
+
+for(i in 1:nrow(ovitrap_results_boxplot)){
+  var <- ovitrap_results_boxplot$Ovitrap[i]
+  tot_tested <- ovitrap_results_boxplot$ovi_n_obs[i]
+  n <- tot_tested - 1
+  
+  ovitrap_results_boxplot$lower_ovi_CI[i] <- (n*var)/qchisq(0.975, df = n)
+  ovitrap_results_boxplot$upper_ovi_CI[i] <- (n*var)/qchisq(0.025, df = n)
+}
+
+ovitrap_results_boxplot <- as.data.frame(ovitrap_results_boxplot)
+
+## BG-trap
+bg_results_boxplot <- bgtrap_results_2 %>%
+  group_by(cluster, month) %>%
+  mutate(bg_n_obs = n()) %>%
+  summarize("BG-Trap" = var(trap_prop, na.rm = T), 
+            bg_n_obs) %>%
+  mutate(month = str_to_title(month),
+         month = factor(month, levels = c("March", "April", "May"), ordered = T)) %>%
+  distinct(cluster, month, .keep_all = T)
+
+### add confidence intervals
+bg_results_boxplot$lower_bg_CI <- NA
+bg_results_boxplot$upper_bg_CI <- NA
+
+for(i in 1:nrow(bg_results_boxplot)){
+  var <- bg_results_boxplot$"BG-Trap"[i]
+  tot_tested <- bg_results_boxplot$bg_n_obs[i]
+  n <- tot_tested - 1
+  
+  bg_results_boxplot$lower_bg_CI[i] <- (n*var)/qchisq(0.975, df = n)
+  bg_results_boxplot$upper_bg_CI[i] <- (n*var)/qchisq(0.025, df = n)
+}
+
+bg_results_boxplot <- as.data.frame(bg_results_boxplot)
+
+## Combine datasets 
+boxplot_df <- left_join(ovitrap_results_boxplot, bg_results_boxplot, 
+                        by = c("cluster" = "cluster", "month" = "month"))
+boxplot_df <- boxplot_df %>%
+  dplyr::select(cluster, month, Ovitrap, lower_ovi_CI, upper_ovi_CI, 
+                "BG-Trap", lower_bg_CI, upper_bg_CI)
+
+## Pivot longer
+boxplot_df_long <- boxplot_df %>%
+  pivot_longer(cols = c("Ovitrap", "BG-Trap"), 
+               values_to = "range", 
+               names_to = "trap_type") %>%
+  ungroup() %>%
+  group_by(month)
+
+
+## Plots
+ggplot(boxplot_df_long, aes(x = month, y = range, fill = trap_type))+
+  geom_boxplot()+
+  scale_fill_manual(values = c("red", "blue"), 
+                    name = "Trap Type")+
+  ylab("Within Cluster Variance")+
+  xlab("Month")+
+  theme_classic()+
+  theme(axis.text = element_text(size = 16), 
+        axis.title = element_text(size = 18, face = "bold"))
+
+
+ggplot(boxplot_df_long, aes(x = month, y = range, fill = trap_type))+
+  geom_violin()+
+  scale_fill_manual(values = c("red", "blue"), 
+                    name = "Trap Type")+
+  ylab("Within Cluster Variance")+
+  xlab("Month")+
+  theme_classic()+
+  theme(axis.text = element_text(size = 16), 
+        axis.title = element_text(size = 18, face = "bold"))
+
+## Summarize
+boxplot_df %>%
+  group_by(month) %>%
+  summarize(ovitrap = mean(Ovitrap, na.rm = T), 
+            BG = mean(`BG-Trap`, na.rm = T))
+
+# Forest Plots
+### get number of observations
+n_obs <- left_join(ovitrap_results_boxplot, bg_results_boxplot, 
+                        by = c("cluster" = "cluster", "month" = "month")) %>%
+  dplyr::select(cluster, month, ovi_n_obs, bg_n_obs)
+
+n_obs <- n_obs %>%
+  rename(Ovitrap = ovi_n_obs, 
+         "BG-Trap" = bg_n_obs)
+
+n_obs_long <- n_obs %>%
+  pivot_longer(cols = c(Ovitrap, "BG-Trap"), 
+               values_to = "n_obs", 
+               names_to = "trap")
+
+### pivot longer
+forest_df_long <- left_join(boxplot_df_long, n_obs_long, 
+                            by = c("cluster" = "cluster", 
+                                   "month" = "month", "trap_type" = "trap"))
+forest_df_long_2 <- forest_df_long %>%
+  dplyr::select(cluster, month, trap_type, range, n_obs)
+
+### add confidence intervals
+forest_df_long_2$lower_CI <- NA
+forest_df_long_2$upper_CI <- NA
+
+for(i in 1:nrow(forest_df_long_2)){
+  var <- forest_df_long_2$range[i]
+  tot_tested <- forest_df_long_2$n_obs[i]
+  n <- tot_tested - 1
+  
+  forest_df_long_2$lower_CI[i] <- (n*var)/qchisq(0.975, df = n)
+  forest_df_long_2$upper_CI[i] <- (n*var)/qchisq(0.025, df = n)
+}
+
+forest_df_long_2 <- as.data.frame(forest_df_long_2)
+
+### March plot
+forest_df_long_2 %>%
+  filter(month == "March") %>%
+  ggplot(aes(y = fct_rev(cluster)))+
+  geom_point(aes(x = range, color = trap_type), shape = 15, size = 3)+
+  geom_linerange(aes(xmin = lower_CI, xmax = upper_CI, color = trap_type), alpha = 0.3)+
+  geom_vline(xintercept = 0, linetype = "dashed")+
+  scale_color_manual(values = c("red", "blue"), 
+                    name = "Trap Type")+
+  xlim(0, 1)+
+  theme_classic()+
+  xlab("Variance")+
+  ylab("Cluster")+
+  labs(title = "March")
+
+### April plot
+forest_df_long_2 %>%
+  filter(month == "April") %>%
+  ggplot(aes(y = fct_rev(cluster)))+
+  geom_point(aes(x = range, color = trap_type), shape = 15, size = 3)+
+  geom_linerange(aes(xmin = lower_CI, xmax = upper_CI, color = trap_type), alpha = 0.3)+
+  geom_vline(xintercept = 0, linetype = "dashed")+
+  scale_color_manual(values = c("red", "blue"), 
+                    name = "Trap Type")+
+  xlim(0, 1)+
+  theme_classic()+
+  xlab("Variance")+
+  ylab("Cluster")+
+  labs(title = "April")
+
+### May plot
+forest_df_long_2 %>%
+  filter(month == "May") %>%
+  ggplot(aes(y = fct_rev(cluster)))+
+  geom_point(aes(x = range, color = trap_type), shape = 15, size = 3)+
+  geom_linerange(aes(xmin = lower_CI, xmax = upper_CI, color = trap_type), alpha = 0.3)+
+  geom_vline(xintercept = 0, linetype = "dashed")+
+  scale_color_manual(values = c("red", "blue"), 
+                    name = "Trap Type")+
+  xlim(0, 1)+
+  theme_classic()+
+  xlab("Variance")+
+  ylab("Cluster")+
+  labs(title = "May")
+
+```
