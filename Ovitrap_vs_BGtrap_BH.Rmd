@@ -1,0 +1,470 @@
+---
+title: "Ovitrap vs. BG-trap Comparison"
+author: "Elisabeth Nelson"
+date: "2025-02-12"
+output: html_document
+---
+## Packages 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(tidyverse)
+library(lubridate)
+library(readr)
+library(viridis)
+library(gam)
+library(MASS)
+library(betareg)
+library(stats)
+library(gamlss)
+library(gamlss.dist)
+library(rjags)
+library(zoib)
+library(lme4)
+library(glmmTMB)
+
+```
+
+## Data
+```{r - import data}
+ovitrap_results <- read_csv("ovitrap_results.csv")
+bgtrap_results <- read_csv("bgtrap_results.csv")
+
+```
+
+## Descriptive Analyses 
+### Ovitrap Results 
+```{r - ovitrap descriptive}
+## ensure data is in the right format and filter out <1 larvae tested
+ovitrap_results_2 <- ovitrap_results %>%
+  mutate(time_point = as.factor(time_point), 
+         month = factor(month, levels = c("March", "April", "May"), ordered = T),
+         cluster = factor(cluster, levels = c("A", "B", "C", "D", "E", "F", "G", 
+                                              "H", "I", "J", "K", "L"), 
+                          ordered = T), 
+         trap_prop = n_wmel/n_aeg) %>%
+  filter(n_larvae_tested > 0)
+
+## look at excluded data 
+ovitrap_results_excluded <- ovitrap_results %>%
+  mutate(time_point = as.factor(time_point), 
+         month = factor(month, levels = c("March", "April", "May"), ordered = T), 
+         cluster = factor(cluster, levels = c("A", "B", "C", "D", "E", "F", "G", 
+                                              "H", "I", "J", "K", "L"), 
+                          ordered = T), 
+         trap_prop = n_wmel/n_aeg) %>%
+ filter(n_larvae_tested == 0) 
+
+ovitrap_results_excluded %>%
+  group_by(month) %>%
+  summarize(n = n())
+
+## visualize distribution
+ggplot(ovitrap_results_2)+
+  geom_point(aes(trap, n_larvae, group = month))+
+  facet_wrap(~month)
+
+## total larvae collected and tested
+### all 
+ovitrap_results_2 %>%
+  ungroup()%>%
+  summarize(tot_larvae = sum(n_larvae), 
+            tot_larvae_tested = sum(n_larvae_tested), 
+            tot_wmel = sum(n_wmel),
+            tot_wt = sum(n_wt), 
+            tot_aeg = sum(n_aeg), 
+            tot_alb = sum(n_alb))
+
+### by month
+ovitrap_results_2 %>%
+  group_by(month) %>%
+    summarize(tot_larvae = sum(n_larvae), 
+            tot_larvae_tested = sum(n_larvae_tested), 
+            tot_wmel = sum(n_wmel),
+            tot_wt = sum(n_wt), 
+            tot_aeg = sum(n_aeg), 
+            tot_alb = sum(n_alb))
+
+### by time point
+ovitrap_results_2 %>%
+  group_by(time_point) %>%
+    summarize(tot_larvae = sum(n_larvae), 
+            tot_larvae_tested = sum(n_larvae_tested), 
+            tot_wmel = sum(n_wmel),
+            tot_wt = sum(n_wt), 
+            tot_aeg = sum(n_aeg), 
+            tot_alb = sum(n_alb))
+
+### by cluster
+ovitrap_results_2 %>%
+  group_by(cluster) %>%
+    summarize(tot_larvae = sum(n_larvae), 
+            tot_larvae_tested = sum(n_larvae_tested), 
+            tot_wmel = sum(n_wmel),
+            tot_wt = sum(n_wt), 
+            tot_aeg = sum(n_aeg), 
+            tot_alb = sum(n_alb))
+
+## total larvae collected vs. tested by cluster and time point
+ovitrap_results_cluster_summ <- ovitrap_results_2 %>%
+  group_by(cluster, month) %>%
+  summarize(tot_larvae = sum(n_larvae), 
+            tot_larvae_tested = sum(n_larvae_tested), 
+            tot_wmel = sum(n_wmel))
+
+### plot
+ggplot(ovitrap_results_cluster_summ)+
+  geom_col(aes(cluster, tot_larvae, group = month, color = cluster, 
+               fill = cluster))+
+  scale_color_viridis(discrete = T, option = "viridis")+
+  scale_fill_viridis(discrete = T, option = "viridis")+
+  facet_wrap(~month)+
+  xlab("Cluster")+
+  ylab("Larvae Tested")+
+  labs(title = "Total Larvae Tested Collected")+
+  ylim(0, 500)+
+  theme_classic()
+
+## visualize Wolbachia prevalences
+ggplot(ovitrap_results_2, aes(trap_prop))+
+  geom_histogram(fill = "lightblue", color = "navy")+
+  xlim(0, 1)+
+  ylim(0, 5)+
+  theme_classic()+
+  xlab("Oviposition Trap Proportion")+
+  ylab("Count")
+
+## proportions by cluster
+ovitrap_results_3 <- ovitrap_results_2 %>%
+  group_by(cluster) %>%
+  summarize(wmel_cluster_tot = sum(n_wmel), 
+            wt_cluster_tot = sum(n_wt), 
+            aeg_cluster_tot = sum(n_aeg), 
+            alb_cluster_tot = sum(n_alb), 
+            cluster_tot_tested = sum(n_larvae_tested), 
+            avg_cluster_prop = mean(trap_prop, na.rm = T), 
+            sd_cluster_prop = sd(trap_prop, na.rm = T)) %>%
+  ungroup()
+
+### add binomial confidence intervals
+ovitrap_results_3$lower_CI <- NA
+ovitrap_results_3$upper_CI <- NA
+
+for(i in 1:nrow(ovitrap_results_3)){
+  prop <- ovitrap_results_3$avg_cluster_prop[i]
+  tot_tested <- ovitrap_results_3$cluster_tot_tested[i]
+  
+  conf <- prop.test(x = prop*tot_tested, n = tot_tested, conf.level = 0.95, correct = F)
+  
+  ovitrap_results_3$lower_CI[i] <- conf$conf.int[[1]]
+  ovitrap_results_3$upper_CI[i] <- conf$conf.int[[2]]
+}
+
+ovitrap_results_3 <- as.data.frame(ovitrap_results_3)
+
+## proportions by cluster and time point
+ovitrap_results_4 <- ovitrap_results_2 %>%
+  group_by(cluster, month) %>%
+  summarize(wmel_cluster_tot = sum(n_wmel), 
+            wt_cluster_tot = sum(n_wt), 
+            aeg_cluster_tot = sum(n_aeg), 
+            alb_cluster_tot = sum(n_alb), 
+            cluster_tot_tested = sum(n_larvae_tested), 
+            avg_cluster_prop = mean(trap_prop, na.rm = T), 
+            sd_cluster_prop = sd(trap_prop, na.rm = T)) %>%
+  ungroup()
+
+### add confidence intervals
+ovitrap_results_4$lower_CI <- NA
+ovitrap_results_4$upper_CI <- NA
+
+for(i in 1:nrow(ovitrap_results_4)){
+  prop <- ovitrap_results_4$avg_cluster_prop[i]
+  tot_tested <- ovitrap_results_4$cluster_tot_tested[i]
+  
+  conf <- prop.test(x = prop*tot_tested, n = tot_tested, conf.level = 0.95, correct = F)
+  
+  ovitrap_results_4$lower_CI[i] <- conf$conf.int[[1]]
+  ovitrap_results_4$upper_CI[i] <- conf$conf.int[[2]]
+}
+
+ovitrap_results_4 <- as.data.frame(ovitrap_results_4)
+
+ovitrap_results_4 <- ovitrap_results_4 %>%
+  mutate(month = tolower(month),
+         month = factor(month, levels = c("march", "april", "may"), ordered = T)) %>%
+  arrange(cluster, month)
+
+### plot
+ggplot(ovitrap_results_4, aes(month, avg_cluster_prop, group = cluster, color = cluster))+
+  geom_line()+
+  geom_errorbar(aes(ymin = lower_CI, ymax = upper_CI, width = 0.2))+
+  geom_point()+
+  scale_color_viridis(discrete = T, option = "viridis")+
+  theme_bw()+
+  xlab("Time Point")+
+  ylab("Proportion Aedes aegypti wMel Positive")+
+  labs(title = "Ovitrap Prevalence")
+
+### histogram
+ggplot(ovitrap_results_4, aes(avg_cluster_prop))+
+  geom_histogram(fill = "lightblue", color = "navy")+
+  scale_fill_viridis(option = "viridis")+
+  xlim(0, 1)+
+  ylim(0, 4)+
+  theme_classic()+
+  xlab("Oviposition Trap Prevalence Estimates (by cluster and time point)")+
+  ylab("Count")
+
+```
+
+### BG-Trap Results
+```{r - bg descriptive}
+## ensure data is in the right format and filter out <1 adult tested
+bgtrap_results_2 <- bgtrap_results %>%
+  mutate(year_week = as.factor(year_week), 
+         month = factor(month, levels = c("march", "april", "may"), ordered = T),
+         cluster = factor(cluster, levels = c("A", "B", "C", "D", "E", "F", "G", 
+                                              "H", "I", "J", "K", "L"), 
+                          ordered = T), 
+         tot_adults = total_aegypti_caught + total_albopictus_caught, 
+         tot_tested = screening_total_aeg,
+         trap_prop = screening_wmel_aeg/screening_total_aeg, 
+         screening_wt = screening_total_aeg-screening_wmel_aeg) %>%
+  filter(tot_adults > 0)
+
+## look at excluded data 
+bgtrap_results_excluded <- bgtrap_results %>%
+  mutate(year_week = as.factor(year_week), 
+         month = factor(month, levels = c("march", "april", "may"), ordered = T),
+         cluster = factor(cluster, levels = c("A", "B", "C", "D", "E", "F", "G", 
+                                              "H", "I", "J", "K", "L"), 
+                          ordered = T), 
+         tot_adults = total_aegypti_caught + total_albopictus_caught, 
+         tot_tested = screening_total_aeg,
+         trap_prop = screening_wmel_aeg/screening_total_aeg, 
+         screening_wt = screening_total_aeg-screening_wmel_aeg) %>%
+ filter(tot_adults == 0) 
+
+bgtrap_results_excluded %>%
+  group_by(month) %>%
+  summarize(n = n())
+
+## total adults by time point
+bg_results_2 %>%
+  group_by(month) %>%
+  summarize(total_adults = sum(tot_adults, na.rm = T), 
+            total_alb = sum(total_albopictus_caught, na.rm  = T), 
+            total_screen_aeg = sum(screening_total_aeg, na.rm = T), 
+            total_wmel = sum(screening_wmel_aeg, na.rm = T))
+ 
+
+## visualize Wolbachia prevalences
+ggplot(bgtrap_results_2, aes(trap_prop))+
+  geom_histogram(fill = "lightblue", color = "navy")+
+  xlim(0, 1)+
+  ylim(0, 20)+
+  theme_classic()+
+  xlab("BG-Sentinel Trap Proportion")+
+  ylab("Count")
+
+bgtrap_results_2 %>%
+  group_by(cluster) %>%
+  summarize(tot_aeg = sum(total_aegypti_caught, na.rm = T), 
+            tot_alb = sum(total_albopictus_caught, na.rm = T), 
+            tot_aeg_tested = sum(screening_total_aeg, na.rm = T), 
+            tot_wmel = sum(screening_wmel_aeg, na.rm = T), 
+            tot_caught = tot_aeg + tot_alb)
+
+## proportions by cluster 
+bgtrap_results_3 <- bgtrap_results_2 %>%
+  group_by(cluster) %>%
+  summarize(wmel_cluster_tot = sum(screening_wmel_aeg, na.rm = T), 
+            wt_cluster_tot = sum(screening_wt, na.rm = T), 
+            aeg_cluster_tot = sum(total_aegypti_caught, na.rm = T), 
+            alb_cluster_tot = sum(total_albopictus_caught, na.rm = T), 
+            cluster_tot_tested = sum(screening_total_aeg, na.rm = T), 
+            avg_cluster_prop = mean(trap_prop, na.rm = T), 
+            avg_cluster_sd = sd(trap_prop, na.rm = T))
+
+### add confidence intervals
+bgtrap_results_3$lower_CI <- NA
+bgtrap_results_3$upper_CI <- NA
+
+for(i in 1:nrow(bgtrap_results_3)){
+  prop <- bgtrap_results_3$avg_cluster_prop[i]
+  tot_tested <- bgtrap_results_3$cluster_tot_tested[i]
+  
+  conf <- prop.test(x = prop*tot_tested, n = tot_tested, conf.level = 0.95, correct = F)
+  
+  bgtrap_results_3$lower_CI[i] <- conf$conf.int[[1]]
+  bgtrap_results_3$upper_CI[i] <- conf$conf.int[[2]]
+}
+
+bgtrap_results_3 <- as.data.frame(bgtrap_results_3) 
+
+## proportions by cluster and time point
+bgtrap_results_4 <- bgtrap_results_2 %>%
+  group_by(cluster, month) %>%
+  summarize(wmel_cluster_tot = sum(screening_wmel_aeg, na.rm = T), 
+            wt_cluster_tot = sum(screening_wt, na.rm = T), 
+            aeg_cluster_tot = sum(total_aegypti_caught, na.rm = T), 
+            alb_cluster_tot = sum(total_albopictus_caught, na.rm = T), 
+            cluster_tot_tested = sum(screening_total_aeg, na.rm = T), 
+            avg_cluster_prop = mean(trap_prop, na.rm = T), 
+            avg_cluster_sd = sd(trap_prop, na.rm = T))
+
+### add confidence intervals
+bgtrap_results_4$lower_CI <- NA
+bgtrap_results_4$upper_CI <- NA
+
+for(i in 1:nrow(bgtrap_results_4)){
+  prop <- bgtrap_results_4$avg_cluster_prop[i]
+  tot_tested <- bgtrap_results_4$cluster_tot_tested[i]
+  
+  conf <- prop.test(x = prop*tot_tested, n = tot_tested, conf.level = 0.95, correct = F)
+  
+  bgtrap_results_4$lower_CI[i] <- conf$conf.int[[1]]
+  bgtrap_results_4$upper_CI[i] <- conf$conf.int[[2]]
+}
+
+bgtrap_results_4 <- as.data.frame(bgtrap_results_4) 
+
+## visualize
+ggplot(bgtrap_results_4, aes(month, avg_cluster_prop, group = cluster, 
+                color = cluster))+
+  geom_line()+
+  geom_point()+
+  geom_errorbar(aes(ymin = lower_CI, ymax = upper_CI, width = 0.2))+
+  scale_color_viridis(discrete = T, option = "viridis")+
+  theme_bw()+
+  xlab("Time Point")+
+  ylab("Proportion Aedes aegypti wMel Positive")+
+  ylim(0, 1)+
+  labs(title = "BG-Trap Prevalence")
+
+## histogram
+ggplot(bgtrap_results_4, aes(avg_cluster_prop))+
+  geom_histogram(fill = "lightblue", color = "navy")+
+  scale_fill_viridis(option = "viridis")+
+  xlim(0, 1)+
+  theme_classic()+
+  xlab("Bg-Sentinel Prevalence Estimates (by cluster and time point)")+
+  ylab("Count")
+
+```
+
+## Combine Ovitrap and BG-trap into One Dataframe
+```{r}
+## comparing avg_cluster_prop from both Ovitraps and BG Traps
+trap_results <- left_join(bgtrap_results_4, ovitrap_results_4, by = c("cluster" = "cluster", "month" = "month"))
+
+## final data frame
+trap_results_final <- trap_results %>%
+  rename(bg = avg_cluster_prop.x, 
+         "bg_lower_CI" = "lower_CI.x", 
+         "bg_upper_CI" = "upper_CI.x",
+        # bg_adjusted = avg_adjusted_trap_prop, 
+        # "bg_adj_lower_CI" = "lower_CI.y.x",
+        # "bg_adj_upper_CI" = "upper_CI.y.x",
+    ovitrap = avg_cluster_prop.y, 
+         "ovitrap_lower_CI" = "lower_CI.y", 
+         "ovitrap_upper_CI" = "upper_CI.y") %>%
+        # ovitrap_adjusted = adj_cluster_prop, 
+        # "adj_ovi_lower_CI" = "lower_CI.y.y", 
+       #  "adj_ovi_upper_CI" = "upper_CI.y.y"
+  dplyr::select(cluster, month, ovitrap, "ovitrap_lower_CI", "ovitrap_upper_CI", bg, "bg_lower_CI", "bg_upper_CI") %>%
+  arrange(month, cluster)
+
+## final by cluster (not time points)
+trap_results_final_cluster <- trap_results_final %>%
+  group_by(cluster) %>%
+  summarize(cluster_ovi = mean(ovitrap),
+            cluster_bg = mean(bg))
+
+```
+
+## Plots of Wolbachia Prevalences
+```{r}
+## set colors
+colors <- c("Ovitrap" = "blue", "BG-Trap" = "red")
+mozzies <- c("Hatched Larvae" = viridis_pal[1], "Adults" = viridis_pal[4])
+
+## March
+trap_results_final %>%
+  filter(month == "march") %>%
+ggplot(aes(x = cluster))+
+  geom_point(aes(y = ovitrap, color = "Ovitrap"), size = 3)+
+  geom_errorbar(aes(ymin = ovitrap_lower_CI, ymax = ovitrap_upper_CI), color = "blue", lty = 3)+
+  geom_point(aes(y = bg, color = "BG-Trap"), size = 3)+
+  geom_errorbar(aes(ymin = bg_lower_CI, ymax = bg_upper_CI), lty = 2, color = "red")+
+  theme_classic()+ 
+  xlab("Cluster")+
+  ylab("wMel Prevalence")+
+  scale_color_manual(name = "Trap Type", values = colors)+
+  theme(axis.text = element_text(size = 16), 
+        axis.title = element_text(size = 18, face = "bold"))
+
+## April
+trap_results_final %>%
+  filter(month == "april") %>%
+ggplot(aes(x = cluster))+
+  geom_point(aes(y = ovitrap, color = "Ovitrap"), size = 3)+
+  geom_errorbar(aes(ymin = ovitrap_lower_CI, ymax = ovitrap_upper_CI), color = "blue", lty = 3)+
+  geom_point(aes(y = bg, color = "BG-Trap"), size = 3)+
+  geom_errorbar(aes(ymin = bg_lower_CI, ymax = bg_upper_CI), lty = 2, color = "red")+
+  theme_classic()+ 
+  xlab("Cluster")+
+  ylab("wMel Prevalence")+
+  scale_color_manual(name = "Trap Type", values = colors)+
+  theme(axis.text = element_text(size = 16), 
+        axis.title = element_text(size = 18, face = "bold"))
+
+## May
+trap_results_final %>%
+  filter(month == "may") %>%
+ggplot(aes(x = cluster))+
+  geom_point(aes(y = ovitrap, color = "Ovitrap"), size = 3)+
+  geom_errorbar(aes(ymin = ovitrap_lower_CI, ymax = ovitrap_upper_CI), color = "blue", lty = 3)+
+  geom_point(aes(y = bg, color = "BG-Trap"), size = 3)+
+  geom_errorbar(aes(ymin = bg_lower_CI, ymax = bg_upper_CI), lty = 2, color = "red")+
+  theme_classic()+ 
+  xlab("Cluster")+
+  ylab("wMel Prevalence")+
+  scale_color_manual(name = "Trap Type", values = colors)+
+  theme(axis.text = element_text(size = 16), 
+        axis.title = element_text(size = 18, face = "bold"))
+
+```
+
+## Correlation Plots 
+```{r}
+## By Month
+trap_results_final_2 <- trap_results_final %>%
+  mutate(month = str_to_title(month), 
+         month = factor(month, levels = c("March", "April", "May")))
+
+viridis_pal <- c(viridis::viridis(n = 3))
+months <- c("March" = viridis_pal[1], "April" = viridis_pal[2], "May" = viridis_pal[3])
+
+ggplot(trap_results_final_2, aes(bg, ovitrap))+
+  geom_point(size = 3, aes(color = month))+
+  geom_errorbar(aes(ymin = ovitrap_lower_CI, ymax = ovitrap_upper_CI), alpha = 0.15, show.legend = F)+
+  geom_errorbar(aes(xmin = bg_lower_CI, xmax = bg_upper_CI), alpha = 0.15, show.legend = F)+
+  geom_smooth(aes(bg, ovitrap), method = "lm", se = F, color = "black", )+
+  geom_vline(xintercept = 0.6, color = "blue", lty = 2)+
+  geom_hline(yintercept = 0.6, color = "blue", lty = 2)+
+  theme_classic()+
+  xlab("Adult wMel Prevalence (BG-trap based)")+
+  ylab("Hatched Larvae wMel Prevalence (Ovitrap based)")+
+  theme(axis.text = element_text(size = 16), 
+        axis.title = element_text(size = 16, face = "bold"))+
+  scale_color_manual(name = "Month", values = months)+
+  theme(aspect.ratio = 1)
+
+## calculate r^2
+lm_model <- lm(ovitrap~bg, data = trap_results_final_2) 
+
+```
+
