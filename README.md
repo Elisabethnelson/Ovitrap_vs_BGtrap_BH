@@ -1,6 +1,6 @@
 Code for the manuscript "Comparison of oviposition and adult trapping to monitor wMel introgression for Wolbachia-based vector control"
 
-By Elisabeth Nelson1, Thiago N. Pereira, Erica Milena de Castro Ribeiro, Bianca Daoud Mafra e Silva, Carolina Camillo, Thiago Rodrigues da Costa, Mauro M. Teixeira, 
+By Elisabeth Nelson, Thiago N. Pereira, Erica Milena de Castro Ribeiro, Bianca Daoud Mafra e Silva, Carolina Camillo, Thiago Rodrigues da Costa, Mauro M. Teixeira, 
 Albert I. Ko, Derek A. T. Cummings, and Luciano A. Moreira
 
 Our study explored a more affordable alternative: using oviposition traps (ovitraps), which collect mosquito eggs instead of adults. In Belo Horizonte, Brazil, we 
