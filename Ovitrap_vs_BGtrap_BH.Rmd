@@ -23,6 +23,8 @@ library(rjags)
 library(zoib)
 library(lme4)
 library(glmmTMB)
+library(weights)
+library(purrr)
 
 ```
 
@@ -251,11 +253,13 @@ bgtrap_results_excluded %>%
   group_by(month) %>%
   summarize(n = n())
 
+
 ## total adults by time point
-bg_results_2 %>%
-  group_by(month) %>%
+bgtrap_results_2 %>%
+  #group_by(month) %>%
   summarize(total_adults = sum(tot_adults, na.rm = T), 
             total_alb = sum(total_albopictus_caught, na.rm  = T), 
+            total_aeg = sum(total_aegypti_caught, na.rm = T),
             total_screen_aeg = sum(screening_total_aeg, na.rm = T), 
             total_wmel = sum(screening_wmel_aeg, na.rm = T))
  
@@ -365,16 +369,19 @@ trap_results_final <- trap_results %>%
   rename(bg = avg_cluster_prop.x, 
          "bg_lower_CI" = "lower_CI.x", 
          "bg_upper_CI" = "upper_CI.x",
+         "bg_tot_tested" = "cluster_tot_tested.x",
         # bg_adjusted = avg_adjusted_trap_prop, 
         # "bg_adj_lower_CI" = "lower_CI.y.x",
         # "bg_adj_upper_CI" = "upper_CI.y.x",
     ovitrap = avg_cluster_prop.y, 
          "ovitrap_lower_CI" = "lower_CI.y", 
-         "ovitrap_upper_CI" = "upper_CI.y") %>%
+         "ovitrap_upper_CI" = "upper_CI.y", 
+         "ovitrap_tot_tested" = "cluster_tot_tested.y") %>%
         # ovitrap_adjusted = adj_cluster_prop, 
         # "adj_ovi_lower_CI" = "lower_CI.y.y", 
        #  "adj_ovi_upper_CI" = "upper_CI.y.y"
-  dplyr::select(cluster, month, ovitrap, "ovitrap_lower_CI", "ovitrap_upper_CI", bg, "bg_lower_CI", "bg_upper_CI") %>%
+  dplyr::select(cluster, month, ovitrap, "ovitrap_lower_CI", "ovitrap_upper_CI", "ovitrap_tot_tested",
+                bg, "bg_lower_CI", "bg_upper_CI", "bg_tot_tested") %>%
   arrange(month, cluster)
 
 ## final by cluster (not time points)
@@ -480,10 +487,14 @@ trap_results_final_cluster_2 <- trap_results_final_cluster %>%
 
 ## T-Test
 ###by cluster 
-t.test(trap_results_final_cluster_2$cluster_ovi, trap_results_final_cluster_2$cluster_bg, paired = T) 
+wilcox.test(trap_results_final_cluster_2$cluster_ovi, trap_results_final_cluster_2$cluster_bg, paired = TRUE)
 
 ### by cluster and time point
-t.test(trap_results_final_3$ovitrap, trap_results_final_3$bg, paired = T) 
+trap_results_final_3_wx <- trap_results_final_3 %>%
+  filter(!(is.na(ovitrap))) %>%
+  filter(!(ovitrap == 0)) 
+
+wilcox.test(trap_results_final_3_wx$ovitrap, trap_results_final_3_wx$bg, paired = T) 
 
 ## Correlation
 ### check linearity
@@ -1294,3 +1305,441 @@ forest_df_long_2 %>%
   labs(title = "May")
 
 ```
+
+## Sensitivity Analysis - bootstrap resampling
+```{r - boostrap testing}
+#cor.test(~ovitrap+bg, data = trap_results_final_3, method = "spearman") 
+
+## ovitrap trap level - ovitrap_results_2
+## bgtrap trap level - bgtrap_results_2
+
+set.seed(123)
+
+## min number of ovitraps per cluster per month
+ovitraps_n <- ovitrap_results_2 %>%
+  group_by(month, cluster) %>%
+  summarize(n = n()) #3 - 36 
+
+### plot distribution
+viridis_pal <- c(viridis::viridis(n = 3))
+months <- c("March" = viridis_pal[1], "April" = viridis_pal[2], "May" = viridis_pal[3])
+  
+ggplot(ovitraps_n, aes(x = n, group = month)) +
+  geom_histogram(aes(fill = month, color = month)) +
+  scale_color_manual(name = "Month", values = months)+
+  scale_fill_manual(name = "Month", values = months)+
+  labs(x = "Ovitraps per Cluster", y = "Frequency", 
+       fill = "Month") +
+  facet_wrap(~month)+
+  theme_classic(base_size = 14)
+#ggsave("supp_ovitrap_distribution.jpeg", dpi = 1200, height = 5, width = 15)
+
+## min number of bg-traps per cluster per month
+bgtraps_n <- bgtrap_results_2 %>%
+  group_by(month, cluster) %>%
+  summarize(n = n()) #3 - 22
+
+ggplot(bgtraps_n, aes(x = n, group = month)) +
+  geom_histogram(aes(fill = month, color = month)) +
+  scale_color_manual(name = "Month", values = months)+
+  scale_fill_manual(name = "Month", values = months)+
+  xlim(0, 36)+
+  ylim(0, 6)+
+  labs(x = "BG-Traps per Cluster", y = "Frequency", 
+       fill = "Month") +
+  facet_wrap(~month)+
+  theme_classic(base_size = 14)
+ggsave("supp_bgtrap_distribution.jpeg", dpi = 1200, height = 5, width = 15)
+```
+
+### 3 Traps per Cluster
+```{r}
+## Bootstrap loop
+n_boot <- 10000
+
+results_3 <- data.frame(iter = 1:n_boot, rho = NA, p_value = NA)
+
+for (i in 1:n_boot) {
+  sampled_ovi <- ovitrap_results_2 %>%
+    group_by(month, cluster) %>%
+    slice_sample(n = 3) %>%
+    summarize(cluster_prev_ovi = mean(trap_prop, na.rm = TRUE), 
+              tot_aedes_ovi = sum(n_larvae, na.rm = TRUE), 
+              tot_wmel_ovi = sum(n_wmel, na.rm = TRUE),
+              .groups = "drop")
+  
+  sampled_bg <- bgtrap_results_2 %>%
+    group_by(month, cluster) %>%
+    slice_sample(n = 3) %>%
+    summarize(cluster_prev_bg = mean(trap_prop, na.rm = TRUE), 
+              tot_aedes_bg = sum(total_aegypti_caught, na.rm = TRUE), 
+              tot_wmel_bg = sum(screening_wmel_aeg, na.rm = TRUE),
+              .groups = "drop")
+  
+  sampled_df <- left_join(sampled_bg, sampled_ovi, by = c("cluster","month")) %>%
+    group_by(cluster) %>%
+    arrange(month, .by_group = TRUE)
+  
+  corr <- cor.test(~ cluster_prev_ovi + cluster_prev_bg, 
+                   data = sampled_df, method = "spearman")
+  
+  results_3$rho[i] <- unname(corr$estimate)
+  results_3$p_value[i] <- corr$p.value
+}
+
+### plot rho distribution
+rho_mean <- mean(results_3$rho, na.rm = TRUE) # 0.6048486
+rho_ci <- quantile(results_3$rho, probs = c(0.025, 0.975), na.rm = TRUE) # 0.4364182 0.7571468
+
+ggplot(results_3, aes(x = rho)) +
+  geom_histogram(fill = "skyblue", color = "white", bins = 30) +
+  geom_vline(xintercept = rho_mean, color = "red", size = 1, linetype = "dashed") +
+  geom_vline(xintercept = rho_ci, color = "darkgreen", size = 1, linetype = "dotted") +
+  labs(x = "Spearman-rank Correlation Coefficient", y = "Frequency", 
+       title = "Sampling 3 Traps per Cluster") +
+  theme_classic(base_size = 14)+
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1200))
+ggsave("supp_bootstrap_corr_3.jpeg", dpi = 1200)
+
+```
+
+### 5 Traps per Cluster
+```{r}
+## Bootstrap loop
+n_boot <- 10000
+
+results_5 <- data.frame(iter = 1:n_boot, rho = NA, p_value = NA)
+
+for (i in 1:n_boot) {
+  sampled_ovi <- ovitrap_results_2 %>%
+    group_by(month, cluster) %>%
+    group_modify(~ { if (nrow(.x) >= 5) {
+      .x %>% slice_sample(n = 5, replace = FALSE)} else {
+      .x %>% slice_sample(n = 5, replace = TRUE)}}) %>%
+    summarize(cluster_prev_ovi = mean(trap_prop, na.rm = TRUE), 
+              tot_aedes_ovi = sum(n_larvae, na.rm = TRUE), 
+              tot_wmel_ovi = sum(n_wmel, na.rm = TRUE),
+              .groups = "drop")
+  
+  sampled_bg <- bgtrap_results_2 %>%
+    group_by(month, cluster) %>%
+    group_modify(~ { if (nrow(.x) >= 5) {
+      .x %>% slice_sample(n = 5, replace = FALSE)} else {
+      .x %>% slice_sample(n = 5, replace = TRUE)}}) %>%
+    summarize(cluster_prev_bg = mean(trap_prop, na.rm = TRUE), 
+              tot_aedes_bg = sum(total_aegypti_caught, na.rm = TRUE), 
+              tot_wmel_bg = sum(screening_wmel_aeg, na.rm = TRUE),
+              .groups = "drop")
+  
+  sampled_df <- left_join(sampled_bg, sampled_ovi, by = c("cluster","month")) %>%
+    group_by(cluster) %>%
+    arrange(month, .by_group = TRUE)
+  
+  corr <- cor.test(~ cluster_prev_ovi + cluster_prev_bg, 
+                   data = sampled_df, method = "spearman")
+  
+  results_5$rho[i] <- unname(corr$estimate)
+  results_5$p_value[i] <- corr$p.value
+}
+
+### plot rho distribution
+rho_mean <- mean(results_5$rho, na.rm = TRUE) # 0.6506806
+rho_ci <- quantile(results_5$rho, probs = c(0.025, 0.975), na.rm = TRUE) # 0.5196615 0.7721001 
+
+ggplot(results_5, aes(x = rho)) +
+  geom_histogram(fill = "skyblue", color = "white", bins = 30) +
+  geom_vline(xintercept = rho_mean, color = "red", size = 1, linetype = "dashed") +
+  geom_vline(xintercept = rho_ci, color = "darkgreen", size = 1, linetype = "dotted") +
+  labs(x = "Spearman-rank Correlation Coefficient", y = "Frequency", 
+       title = "Sampling 5 Traps per Cluster") +
+  theme_classic(base_size = 14)+
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1200))
+ggsave("supp_bootstrap_corr_5.jpeg", dpi = 1200)
+
+```
+
+### 6 Traps per Cluster
+```{r}
+## Bootstrap loop
+n_boot <- 10000
+
+results_6 <- data.frame(iter = 1:n_boot, rho = NA, p_value = NA)
+
+for (i in 1:n_boot) {
+  sampled_ovi <- ovitrap_results_2 %>%
+    group_by(month, cluster) %>%
+    group_modify(~ { if (nrow(.x) >= 6) {
+      .x %>% slice_sample(n = 6, replace = FALSE)} else {
+      .x %>% slice_sample(n = 6, replace = TRUE)}}) %>%
+    summarize(cluster_prev_ovi = mean(trap_prop, na.rm = TRUE), 
+              tot_aedes_ovi = sum(n_larvae, na.rm = TRUE), 
+              tot_wmel_ovi = sum(n_wmel, na.rm = TRUE),
+              .groups = "drop")
+  
+  sampled_bg <- bgtrap_results_2 %>%
+    group_by(month, cluster) %>%
+    group_modify(~ { if (nrow(.x) >= 6) {
+      .x %>% slice_sample(n = 6, replace = FALSE)} else {
+      .x %>% slice_sample(n = 6, replace = TRUE)}}) %>%
+    summarize(cluster_prev_bg = mean(trap_prop, na.rm = TRUE), 
+              tot_aedes_bg = sum(total_aegypti_caught, na.rm = TRUE), 
+              tot_wmel_bg = sum(screening_wmel_aeg, na.rm = TRUE),
+              .groups = "drop")
+  
+  sampled_df <- left_join(sampled_bg, sampled_ovi, by = c("cluster","month")) %>%
+    group_by(cluster) %>%
+    arrange(month, .by_group = TRUE)
+  
+  corr <- cor.test(~ cluster_prev_ovi + cluster_prev_bg, 
+                   data = sampled_df, method = "spearman")
+  
+  results_6$rho[i] <- unname(corr$estimate)
+  results_6$p_value[i] <- corr$p.value
+}
+
+### plot rho distribution
+rho_mean <- mean(results_6$rho, na.rm = TRUE) # 0.6625991
+rho_ci <- quantile(results_6$rho, probs = c(0.025, 0.975), na.rm = TRUE) # 0.5436989 0.7760384
+
+ggplot(results_6, aes(x = rho)) +
+  geom_histogram(fill = "skyblue", color = "white", bins = 30) +
+  geom_vline(xintercept = rho_mean, color = "red", size = 1, linetype = "dashed") +
+  geom_vline(xintercept = rho_ci, color = "darkgreen", size = 1, linetype = "dotted") +
+  labs(x = "Spearman-rank Correlation Coefficient", y = "Frequency", 
+       title = "Sampling 6 Traps per Cluster") +
+  theme_classic(base_size = 14)+
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1200))
+#ggsave("supp_bootstrap_corr_6.jpeg", dpi = 1200)
+
+```
+
+### 9 Traps per Cluster
+```{r}
+## Bootstrap loop
+n_boot <- 10000
+
+results_9 <- data.frame(iter = 1:n_boot, rho = NA, p_value = NA)
+
+for (i in 1:n_boot) {
+  sampled_ovi <- ovitrap_results_2 %>%
+    group_by(month, cluster) %>%
+    group_modify(~ { if (nrow(.x) >= 9) {
+      .x %>% slice_sample(n = 9, replace = FALSE)} else {
+      .x %>% slice_sample(n = 9, replace = TRUE)}}) %>%
+    summarize(cluster_prev_ovi = mean(trap_prop, na.rm = TRUE), 
+              tot_aedes_ovi = sum(n_larvae, na.rm = TRUE), 
+              tot_wmel_ovi = sum(n_wmel, na.rm = TRUE),
+              .groups = "drop")
+  
+  sampled_bg <- bgtrap_results_2 %>%
+    group_by(month, cluster) %>%
+    group_modify(~ { if (nrow(.x) >= 9) {
+      .x %>% slice_sample(n = 9, replace = FALSE)} else {
+      .x %>% slice_sample(n = 9, replace = TRUE)}}) %>%
+    summarize(cluster_prev_bg = mean(trap_prop, na.rm = TRUE), 
+              tot_aedes_bg = sum(total_aegypti_caught, na.rm = TRUE), 
+              tot_wmel_bg = sum(screening_wmel_aeg, na.rm = TRUE),
+              .groups = "drop")
+  
+  sampled_df <- left_join(sampled_bg, sampled_ovi, by = c("cluster","month")) %>%
+    group_by(cluster) %>%
+    arrange(month, .by_group = TRUE)
+  
+  corr <- cor.test(~ cluster_prev_ovi + cluster_prev_bg, 
+                   data = sampled_df, method = "spearman")
+  
+  results_9$rho[i] <- unname(corr$estimate)
+  results_9$p_value[i] <- corr$p.value
+}
+
+### plot rho distribution
+rho_mean <- mean(results_9$rho, na.rm = TRUE) # 0.6751634
+rho_ci <- quantile(results_9$rho, probs = c(0.025, 0.975), na.rm = TRUE) # 0.5746814 0.7708674
+
+ggplot(results_9, aes(x = rho)) +
+  geom_histogram(fill = "skyblue", color = "white", bins = 30) +
+  geom_vline(xintercept = rho_mean, color = "red", size = 1, linetype = "dashed") +
+  geom_vline(xintercept = rho_ci, color = "darkgreen", size = 1, linetype = "dotted") +
+  labs(x = "Spearman-rank Correlation Coefficient", y = "Frequency", 
+       title = "Sampling 9 Traps per Cluster") +
+  theme_classic(base_size = 14)+
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1200))
+ggsave("supp_bootstrap_corr_9.jpeg", dpi = 1200)
+
+```
+
+### 12 Traps per Cluster
+```{r}
+## Bootstrap loop
+n_boot <- 10000
+
+results_12 <- data.frame(iter = 1:n_boot, rho = NA, p_value = NA)
+
+for (i in 1:n_boot) {
+  sampled_ovi <- ovitrap_results_2 %>%
+    group_by(month, cluster) %>%
+    group_modify(~ { if (nrow(.x) >= 12) {
+      .x %>% slice_sample(n = 12, replace = FALSE)} else {
+      .x %>% slice_sample(n = 12, replace = TRUE)}}) %>%
+    summarize(cluster_prev_ovi = mean(trap_prop, na.rm = TRUE), 
+              tot_aedes_ovi = sum(n_larvae, na.rm = TRUE), 
+              tot_wmel_ovi = sum(n_wmel, na.rm = TRUE),
+              .groups = "drop")
+  
+  sampled_bg <- bgtrap_results_2 %>%
+    group_by(month, cluster) %>%
+    group_modify(~ { if (nrow(.x) >= 12) {
+      .x %>% slice_sample(n = 12, replace = FALSE)} else {
+      .x %>% slice_sample(n = 12, replace = TRUE)}}) %>%
+    summarize(cluster_prev_bg = mean(trap_prop, na.rm = TRUE), 
+              tot_aedes_bg = sum(total_aegypti_caught, na.rm = TRUE), 
+              tot_wmel_bg = sum(screening_wmel_aeg, na.rm = TRUE),
+              .groups = "drop")
+  
+  sampled_df <- left_join(sampled_bg, sampled_ovi, by = c("cluster","month")) %>%
+    group_by(cluster) %>%
+    arrange(month, .by_group = TRUE)
+  
+  corr <- cor.test(~ cluster_prev_ovi + cluster_prev_bg, 
+                   data = sampled_df, method = "spearman")
+  
+  results_12$rho[i] <- unname(corr$estimate)
+  results_12$p_value[i] <- corr$p.value
+}
+
+### plot rho distribution
+rho_mean <- mean(results_12$rho, na.rm = TRUE) # 0.6723427
+rho_ci <- quantile(results_12$rho, probs = c(0.025, 0.975), na.rm = TRUE) # 0.5657083 0.7746815
+
+ggplot(results_12, aes(x = rho)) +
+  geom_histogram(fill = "skyblue", color = "white", bins = 30) +
+  geom_vline(xintercept = rho_mean, color = "red", size = 1, linetype = "dashed") +
+  geom_vline(xintercept = rho_ci, color = "darkgreen", size = 1, linetype = "dotted") +
+  labs(x = "Spearman-rank Correlation Coefficient", y = "Frequency", 
+       title = "Sampling 12 Traps per Cluster") +
+  theme_classic(base_size = 14)+
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1200))
+ggsave("supp_bootstrap_corr_12.jpeg", dpi = 1200)
+
+```
+
+## Sensitivity Analysis - correlation between ovitraps and BG-traps as a function of the number of mosquitoes tested.
+* Correlation weighted by number of mosquitoes tested
+```{r}
+## Stratify by number of mosquitoes tested
+### Create categories of number tested
+quantiles <- quantile(trap_results_final$ovitrap_tot_tested, probs = c(0, 1/3, 2/3, 1), na.rm = TRUE)
+
+trap_results_final <- trap_results_final %>%
+  mutate(
+    strata = cut(ovitrap_tot_tested,
+                 breaks = quantiles,
+                 include.lowest = TRUE,
+                 labels = c("Low", "Medium", "High"))
+  )
+
+trap_results_final %>%
+  group_by(strata) %>%
+  summarize(range = range(ovitrap_tot_tested))
+
+### Run Spearman-rank on each strata
+results <- trap_results_final %>%
+  filter(!(is.na(strata))) %>%
+  group_by(strata) %>%
+  summarise(
+    n = n(),
+    spearman_result = list(cor.test(ovitrap, bg, method = "spearman")),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    estimate = purrr::map_dbl(spearman_result, ~ .x$estimate[[1]]),
+    p_value  = purrr::map_dbl(spearman_result, ~ .x$p.value)
+  ) %>%
+  dplyr::select(strata, n, estimate, p_value)
+
+```
+
+* Linear association: wMel prevalence in BG-traps = β0 + β1 × wMel prevalence in ovitraps + β2 × mosquitoes tested+ϵ
+```{r}
+sens_mod_1 <- glmer.nb(n_wmel_bg ~ ovitrap + n_tested_ovi + (1|cluster) + 
+                  offset(log(total_caught)),  
+                  na.action=na.exclude, data = model3_df)
+
+sens_mod_2 <- glmer.nb(n_wmel_bg ~ ovitrap*n_tested_ovi + (1|cluster) + 
+                  offset(log(total_caught)),  
+                  na.action=na.exclude, data = model3_df)
+
+sens_mod_3 <- glm.nb(n_wmel_bg ~ ovitrap + n_tested_ovi + 
+                  offset(log(total_caught)),  
+                  na.action=na.exclude, data = model3_df)
+
+sens_mod_4 <- glm.nb(n_wmel_bg ~ ovitrap*n_tested_ovi + 
+                  offset(log(total_caught)),  
+                  na.action=na.exclude, data = model3_df)
+
+summary(sens_mod_4)
+
+```
+
+
+
+## Supplemental Figure - trap-level data
+```{r}
+## ovitraps 
+ovitrap_results_2 <- ovitrap_results_2 %>%
+  mutate(month = str_to_title(month), 
+         month = factor(month, levels = c("March", "April", "May")))
+
+ovi_clust <- trap_results_final_2 %>%
+  dplyr::select(cluster, month, ovitrap) %>%
+  rename(cluster_prev = ovitrap)
+
+ovi_clust_trap <- left_join(ovitrap_results_2, ovi_clust, by = c("cluster" = "cluster", 
+                                                                 "month" = "month"))
+viridis_pal <- c(viridis::viridis(n = 3))
+months <- c("March" = viridis_pal[1], "April" = viridis_pal[2], "May" = viridis_pal[3])
+
+## plot
+ovi_clust_trap %>%
+  ggplot()+
+  geom_point(aes(cluster_prev, trap_prop, size = n_larvae, color = month))+
+  labs(x = "Cluster-level wMel Prevalence", 
+       y = "Trap-level wMel Prevalene", 
+       color = "Month", 
+       size = "Aedes Larvae Caught")+ 
+  theme_classic()+
+  scale_color_manual(name = "Month", values = months)+
+   theme(aspect.ratio = 1)
+#ggsave("supp_ovi_trap_prev_dots.jpeg", dpi = 1200)
+
+
+## bg-traps
+bgtrap_results_2 <- bgtrap_results_2 %>%
+  mutate(month = str_to_title(month), 
+         month = factor(month, levels = c("March", "April", "May")))
+
+bg_clust <- trap_results_final_2 %>%
+  dplyr::select(cluster, month, bg) %>%
+  rename(cluster_prev = bg)
+
+bg_clust_trap <- left_join(bgtrap_results_2, bg_clust, by = c("cluster" = "cluster", 
+                                                                 "month" = "month"))
+
+
+### prevalence
+bg_clust_trap %>%
+  ggplot()+
+  geom_point(aes(cluster_prev, trap_prop, size = total_aegypti_caught, color = month))+
+  labs(x = "Cluster-level wMel Prevalence", 
+       y = "Trap-level wMel Prevalene", 
+       color = "Month", 
+       size = "Aedes aegpti Adults Caught")+ 
+  theme_classic()+
+  scale_color_manual(name = "Month", values = months)+
+   theme(aspect.ratio = 1)
+#ggsave("supp_bg_trap_prev_dots.jpeg", dpi = 1200)
+
+
+
+```
+
