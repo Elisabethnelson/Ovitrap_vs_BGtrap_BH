@@ -1699,17 +1699,31 @@ ovi_clust_trap <- left_join(ovitrap_results_2, ovi_clust, by = c("cluster" = "cl
 viridis_pal <- c(viridis::viridis(n = 3))
 months <- c("March" = viridis_pal[1], "April" = viridis_pal[2], "May" = viridis_pal[3])
 
+weighted_model <- lm(trap_prop ~ cluster_prev, 
+                     data = ovi_clust_trap, 
+                     weights = n_larvae)
+
+slope <- coef(weighted_model)[["cluster_prev"]]
+intercept <- coef(weighted_model)[["(Intercept)"]]
+r2 <- summary(weighted_model)$r.squared
+
 ## plot
 ovi_clust_trap %>%
-  ggplot()+
-  geom_point(aes(cluster_prev, trap_prop, size = n_larvae, color = month))+
+  ggplot(aes(x = cluster_prev, y = trap_prop)) +
+  geom_point(aes(size = n_larvae, color = month)) +
+  geom_smooth(aes(weight = n_larvae), method = "lm", color = "black", 
+              se = FALSE, linewidth = 1) +
   labs(x = "Cluster-level wMel Prevalence", 
-       y = "Trap-level wMel Prevalene", 
+       y = "Trap-level wMel Prevalence", 
        color = "Month", 
-       size = "Aedes Larvae Caught")+ 
-  theme_classic()+
-  scale_color_manual(name = "Month", values = months)+
-   theme(aspect.ratio = 1)
+       size = "Aedes Larvae Caught") + 
+  annotate("text", x = 0.05, y = 0.95, 
+           label = paste0("Slope = ", round(slope, 2), 
+                          "\nR² = ", round(r2, 2)), 
+           hjust = 0, vjust = 1, size = 4) +
+  theme_classic() +
+  scale_color_manual(name = "Month", values = months) +
+  theme(aspect.ratio = 1)
 #ggsave("supp_ovi_trap_prev_dots.jpeg", dpi = 1200)
 
 
@@ -1725,15 +1739,29 @@ bg_clust <- trap_results_final_2 %>%
 bg_clust_trap <- left_join(bgtrap_results_2, bg_clust, by = c("cluster" = "cluster", 
                                                                  "month" = "month"))
 
+weighted_model_bg <- lm(trap_prop ~ cluster_prev, 
+                     data = bg_clust_trap, 
+                     weights = total_aegypti_caught)
+
+slope_bg <- coef(weighted_model_bg)[["cluster_prev"]] # 0.9795015
+intercept_bg <- coef(weighted_model_bg)[["(Intercept)"]]
+r2_bg <- summary(weighted_model_bg)$r.squared # 0.661008
+
 
 ### prevalence
 bg_clust_trap %>%
-  ggplot()+
-  geom_point(aes(cluster_prev, trap_prop, size = total_aegypti_caught, color = month))+
+  ggplot(aes(x = cluster_prev, y = trap_prop))+
+  geom_point(aes(size = total_aegypti_caught, color = month))+
+  geom_smooth(aes(weight = total_aegypti_caught), method = "lm", color = "black", 
+              se = FALSE, linewidth = 1) +
   labs(x = "Cluster-level wMel Prevalence", 
        y = "Trap-level wMel Prevalene", 
        color = "Month", 
        size = "Aedes aegpti Adults Caught")+ 
+  annotate("text", x = 0.05, y = 0.95, 
+           label = paste0("Slope = ", round(slope, 2), 
+                          "\nR² = ", round(r2, 2)), 
+           hjust = 0, vjust = 1, size = 4) +
   theme_classic()+
   scale_color_manual(name = "Month", values = months)+
    theme(aspect.ratio = 1)
