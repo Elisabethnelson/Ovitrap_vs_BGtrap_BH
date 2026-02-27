@@ -396,7 +396,7 @@ trap_results_final_cluster <- trap_results_final %>%
 ```{r}
 ## set colors
 colors <- c("Ovitrap" = "blue", "BG-Trap" = "red")
-mozzies <- c("Hatched Larvae" = viridis_pal[1], "Adults" = viridis_pal[4])
+mozzies <- c("Hatched Larvae" = viridis_pal()(4)[1], "Adults" = viridis_pal()(4)[4])
 
 ## March
 trap_results_final %>%
@@ -413,6 +413,8 @@ ggplot(aes(x = cluster))+
   theme(axis.text = element_text(size = 16), 
         axis.title = element_text(size = 18, face = "bold"))
 
+#ggsave("~/Documents/Yale EMD/Year 4/Ovitrap AJTMH/figures/fig_2a.pdf", dpi = 1200)
+
 ## April
 trap_results_final %>%
   filter(month == "april") %>%
@@ -428,6 +430,8 @@ ggplot(aes(x = cluster))+
   theme(axis.text = element_text(size = 16), 
         axis.title = element_text(size = 18, face = "bold"))
 
+#ggsave("~/Documents/Yale EMD/Year 4/Ovitrap AJTMH/figures/fig_2b.pdf", dpi = 1200)
+
 ## May
 trap_results_final %>%
   filter(month == "may") %>%
@@ -442,6 +446,8 @@ ggplot(aes(x = cluster))+
   scale_color_manual(name = "Trap Type", values = colors)+
   theme(axis.text = element_text(size = 16), 
         axis.title = element_text(size = 18, face = "bold"))
+
+#ggsave("~/Documents/Yale EMD/Year 4/Ovitrap AJTMH/figures/fig_2c.pdf", dpi = 1200)
 
 ```
 
@@ -470,6 +476,8 @@ ggplot(trap_results_final_2, aes(bg, ovitrap))+
         axis.title = element_text(size = 16, face = "bold"))+
   scale_color_manual(name = "Month", values = months)+
   theme(aspect.ratio = 1)
+
+#ggsave("~/Documents/Yale EMD/Year 4/Ovitrap AJTMH/figures/fig_3.pdf", dpi = 1200)
 
 ## calculate r^2
 lm_model <- lm(ovitrap~bg, data = trap_results_final_2) 
@@ -962,6 +970,7 @@ ggplot(pred_mod_df_3, aes(n_wmel_bg, mod5_count))+
   theme(axis.text = element_text(size = 16), 
         axis.title = element_text(size = 18, face = "bold"))+
   theme(aspect.ratio = 1) 
+#ggsave("~/Documents/Yale EMD/Year 4/Ovitrap AJTMH/figures/fig_4a.pdf", dpi = 1200)
 
 ### calculate R^2
 lm_mod_5 <- lm(mod5_count ~ n_wmel_bg, data = pred_mod_df_3) 
@@ -977,6 +986,7 @@ ggplot(pred_mod_df_3, aes(n_wmel_bg, mod2_count))+
   theme(axis.text = element_text(size = 16), 
         axis.title = element_text(size = 18, face = "bold"))+
   theme(aspect.ratio = 1) 
+#ggsave("~/Documents/Yale EMD/Year 4/Ovitrap AJTMH/figures/fig_4c.pdf", dpi = 1200)
 
 ### calculate R^2
 lm_mod_2 <- lm(mod2_count ~ n_wmel_bg, data = pred_mod_df_3) 
@@ -995,6 +1005,7 @@ ggplot(pred_mod_df_3, aes(bg, mod5_prev))+
   theme(axis.text = element_text(size = 16), 
         axis.title = element_text(size = 18, face = "bold"))+
   theme(aspect.ratio = 1)
+#ggsave("~/Documents/Yale EMD/Year 4/Ovitrap AJTMH/figures/fig_4b.pdf", dpi = 1200)
 
 ### calculate R^2
 lm_mod_5b <- lm(mod5_prev ~ bg, data = pred_mod_df_3) 
@@ -1013,6 +1024,7 @@ ggplot(pred_mod_df_3, aes(bg, mod2_prev))+
   theme(axis.text = element_text(size = 16), 
         axis.title = element_text(size = 18, face = "bold"))+
   theme(aspect.ratio = 1)
+#ggsave("~/Documents/Yale EMD/Year 4/Ovitrap AJTMH/figures/fig_4d.pdf", dpi = 1200)
 
 ### calculate R^2
 lm_mod_2b <- lm(mod2_prev ~ bg, data = pred_mod_df_3) 
