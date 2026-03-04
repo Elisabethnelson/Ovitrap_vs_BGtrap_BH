@@ -219,6 +219,47 @@ ggplot(ovitrap_results_4, aes(avg_cluster_prop))+
   xlab("Oviposition Trap Prevalence Estimates (by cluster and time point)")+
   ylab("Count")
 
+### hatch rates
+hatch_rate <- ovitrap_results_2 %>%
+  ungroup() %>%
+  mutate(n_unhatched = n_eggs - n_larvae, 
+         n_unhatched_2 = if_else(n_unhatched < 0, 0, n_unhatched), 
+         perc_unhatched = (n_unhatched_2/n_eggs)*100) %>%
+  group_by(cluster, month) %>%
+  mutate(avg_unhatched = median(n_unhatched_2, na.rm = T), 
+            avg_perc_unhatched = median(perc_unhatched))
+
+viridis_pal <- c(viridis::viridis(n = 3))
+months <- c("March" = viridis_pal[1], "April" = viridis_pal[2], "May" = viridis_pal[3])
+
+ggplot(hatch_rate, aes(month, n_unhatched_2))+
+  geom_violin(aes(fill = month))+
+  geom_jitter()+
+  #geom_errorbar(aes(ymin = ovitrap_lower_CI, ymax = ovitrap_upper_CI), alpha = 0.15, show.legend = F)+
+  #geom_errorbar(aes(xmin = bg_lower_CI, xmax = bg_upper_CI), alpha = 0.15, show.legend = F)+
+  theme_classic()+
+  xlab("Month")+
+  ylab("Median No. Unhatched Larvae")+
+  theme(axis.text = element_text(size = 16), 
+        axis.title = element_text(size = 16, face = "bold"))+
+  scale_color_manual(name = "Month", values = months)+
+  theme(aspect.ratio = 1)
+
+ggplot(hatch_rate, aes(month, perc_unhatched))+
+  geom_violin(aes(fill = month))+
+  geom_jitter()+
+  #geom_errorbar(aes(ymin = ovitrap_lower_CI, ymax = ovitrap_upper_CI), alpha = 0.15, show.legend = F)+
+  #geom_errorbar(aes(xmin = bg_lower_CI, xmax = bg_upper_CI), alpha = 0.15, show.legend = F)+
+  theme_classic()+
+  xlab("Month")+
+  ylab("% Unhatched Larvae")+
+  theme(axis.text = element_text(size = 16), 
+        axis.title = element_text(size = 16, face = "bold"))+
+  scale_color_manual(name = "Month", values = months)+
+  theme(aspect.ratio = 1)
+
+
+
 ```
 
 ### BG-Trap Results
